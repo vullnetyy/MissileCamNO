@@ -789,24 +789,24 @@ Fork **https://github.com/KopterBuzz/NOMNOM**. In `modManifests/`, add `MissileC
 {
   "id": "MissileCamNO",
   "name": "MissileCamNO",
-  "description": "Cycle through and follow your own in-flight missiles while flying. RWR/missile warnings keep playing; press ; (configurable) to snap the camera back to your aircraft's cockpit.",
-  "tags": ["QoL"],
+  "description": "Cycle through and follow your own in-flight missiles using '[' and ']' while flying. RWR/missile warnings keep playing. Press ';' (configurable) to snap the camera back to your aircraft's cockpit.",
+  "tags": ["QoL", "Camera"],
   "urls": [
-    { "name": "info", "url": "https://github.com/<YOUR_GITHUB_USERNAME>/MissileCamNO" }
+    { "name": "info", "url": "https://github.com/vullnetyy/MissileCamNO" }
   ],
-  "authors": ["<YOUR_GITHUB_USERNAME>"],
-  "githubUser": "<YOUR_GITHUB_USERNAME>",
+  "authors": ["vullnetyy"],
+  "githubUser": "vullnetyy",
   "githubRepo": "MissileCamNO",
   "autoUpdate": "True",
   "artifacts": [
     {
       "type": "plugin",
-      "fileName": "MissileCamNO-1.0.0.zip",
+      "fileName": "MissileCamNO-1.0.4.zip",
       "downloadUrl": "https://github.com/<YOUR_GITHUB_USERNAME>/MissileCamNO/releases/download/v1.0.0/MissileCamNO-1.0.0.zip",
-      "gameVersion": "0.32",
-      "modVersion": "1.0.0",
+      "gameVersion": "0.33.4",
+      "modVersion": "1.0.4",
       "releaseChannel": "Release",
-      "hash": "sha256:<PASTE_YOUR_DIGEST_HERE>"
+      "hash": "sha256:74ac068f1df45fef76af28129991e99afdf76172dbdc82b48b905a4c85a44e3d"
     }
   ]
 }
