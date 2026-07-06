@@ -4,7 +4,9 @@
 > a **published** Nuclear Option mod that lets you **cycle through and follow your own in‑flight
 > missiles while flying**, keep hearing incoming‑missile warnings the whole time, and snap the
 > camera back to your aircraft's cockpit with a **configurable key (default `;`)** — or
-> **automatically, a few seconds after your last missile detonates**.
+> **automatically, a few seconds after your last missile detonates**. On EW aircraft (Medusa /
+> Alkyon) you can even **keep jamming your selected targets while watching a missile**, just by
+> holding the trigger.
 >
 > **Reader:** senior software engineer, comfortable with the terminal, new to Unity/BepInEx.
 > **Toolchain:** VS Code + .NET SDK CLI. **OS:** Windows 11. **Game:** Steam. **NOMM:** already installed.
@@ -35,7 +37,7 @@
   - [11. `Plugin.cs` — entry point, config, input loop](#11-plugincs--entry-point-config-input-loop)
   - [12. `GameBridge.cs` — the single file that touches the game](#12-gamebridgecs--the-single-file-that-touches-the-game)
   - [13. Behavior recap (what you built)](#13-behavior-recap-what-you-built)
-  - [14. Why the warnings keep playing (confirmed — no code needed)](#14-why-the-warnings-keep-playing-confirmed--no-code-needed)
+  - [14. Why the warnings keep playing, and how jamming stays live (confirmed)](#14-why-the-warnings-keep-playing-and-how-jamming-stays-live-confirmed)
 - [Part E — Local build + test automation](#part-e--local-build--test-automation)
   - [15. First build](#15-first-build)
   - [16. One‑command build → deploy → launch → tail logs](#16-onecommand-build--deploy--launch--tail-logs)
@@ -93,7 +95,10 @@ reuse the game's own camera path:
   (default `3`) after your last in‑flight missile detonates** (both toggle/delay are configurable),
   and
 - **RWR / missile‑warning audio keeps playing** (those alarms are 2D HUD audio driven by the
-  aircraft's sensors, not tied to the camera — confirmed below).
+  aircraft's sensors, not tied to the camera — confirmed below), and
+- on aircraft with **radar‑jamming pods** (Medusa / Alkyon), **holding the trigger keeps jamming
+  your selected targets** even while the camera is following a missile (the mod re‑fires the
+  selected jamming pod each frame; confirmed below).
 
 ### Study these real mods (your best reference material)
 
@@ -399,11 +404,22 @@ namespace MissileCamNO
         private ConfigEntry<bool> _autoReturnEnabled = null!;
         private ConfigEntry<float> _autoReturnDelay = null!;
 
+        // Keep radar-jamming pods (Medusa/Alkyon) active while following a missile and holding fire.
+        private ConfigEntry<bool> _keepJamming = null!;
+
         private readonly MissileTracker _tracker = new MissileTracker();
         private int _cursor = -1;
 
+        // True while the camera is on a missile view (not the cockpit). Distinct from _cursor, which
+        // is only the index into the live-missile list: _cursor gets reset to -1 when the list is
+        // empty, but we can still be showing the last missile's view and owe an auto-return.
+        private bool _following;
+
         // Scheduled time (Time.time) for the pending auto-return, or a negative value when none is armed.
         private float _autoReturnAt = -1f;
+
+        // Whether we are currently driving the jamming pod (used only to log start/stop transitions).
+        private bool _jamming;
 
         private void Awake()
         {
@@ -428,10 +444,17 @@ namespace MissileCamNO
                 "How long to wait, in seconds, after your last missile is gone before auto-returning " +
                 "to the cockpit. Only used when AutoReturnToCockpit is enabled.");
 
+            _keepJamming = Config.Bind("Behavior", "KeepJammingWhileFollowing",
+                true,
+                "While following one of your missiles, keep your radar-jamming pod (e.g. Medusa or " +
+                "Alkyon) active for as long as you hold the Fire trigger, so you can keep jamming your " +
+                "selected targets. Only affects aircraft that actually carry a jamming pod.");
+
             Log.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} loaded. " +
                         $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}] " +
                         $"Return=[{_returnToAircraft.Value}] " +
-                        $"AutoReturn=[{(_autoReturnEnabled.Value ? $"{_autoReturnDelay.Value:0.#}s" : "off")}].");
+                        $"AutoReturn=[{(_autoReturnEnabled.Value ? $"{_autoReturnDelay.Value:0.#}s" : "off")}] " +
+                        $"KeepJamming=[{(_keepJamming.Value ? "on" : "off")}].");
         }
 
         private void Update()
@@ -441,7 +464,9 @@ namespace MissileCamNO
             {
                 _tracker.DetachIfNeeded(null);
                 _cursor = -1;
+                _following = false;
                 _autoReturnAt = -1f;
+                _jamming = false;
                 return;
             }
 
@@ -452,6 +477,10 @@ namespace MissileCamNO
             if (_cycleNext.Value.IsDown()) Cycle(+1);
             else if (_cyclePrev.Value.IsDown()) Cycle(-1);
             else if (_returnToAircraft.Value.IsDown()) ReturnToAircraft();
+
+            // While following a missile, keep a held-trigger jamming pod firing (EW aircraft). This
+            // must run every frame the trigger is held, since the pod disables itself otherwise.
+            UpdateJamming(aircraft);
 
             // Check the auto-return timer only about once a second (every 60 frames). A ~1s delay in
             // returning is imperceptible, and this keeps the per-frame work out of the hot path.
@@ -470,10 +499,13 @@ namespace MissileCamNO
             {
                 Log.LogInfo("No in-flight missiles of yours to follow.");
                 _cursor = -1;
+                // Intentionally keep _following as-is: if we were already watching a missile that
+                // has since detonated, a pending auto-return must still fire (don't cancel it here).
                 return;
             }
 
             _cursor = ((_cursor + direction) % missiles.Count + missiles.Count) % missiles.Count;
+            _following = true;
             GameBridge.FollowUnit(missiles[_cursor]);
             Log.LogInfo($"Following missile {_cursor + 1}/{missiles.Count}. " +
                         $"Press [{_returnToAircraft.Value}] to return to your aircraft.");
@@ -483,16 +515,31 @@ namespace MissileCamNO
         {
             GameBridge.ReturnToAircraft();
             _cursor = -1;   // next cycle starts from the first missile again
+            _following = false;
             _autoReturnAt = -1f;
             Log.LogInfo("Returned to your aircraft.");
+        }
+
+        // Keeps the jamming pod alive while following a missile and holding the trigger. Runs every
+        // frame (unthrottled) because a jamming pod disables itself the moment it isn't re-fired.
+        private void UpdateJamming(Aircraft? aircraft)
+        {
+            bool jamming = _keepJamming.Value
+                           && _following
+                           && GameBridge.IsFireHeld()
+                           && GameBridge.KeepJammingActive(aircraft);
+
+            if (jamming && !_jamming)
+                Log.LogInfo("Keeping your radar-jamming pod active while following (hold Fire).");
+            _jamming = jamming;
         }
 
         // Arms a short countdown once we're following a missile and none of ours remain in flight,
         // then snaps back to the cockpit when it elapses. Any new/remaining missile cancels it.
         private void UpdateAutoReturn()
         {
-            // Only relevant while the feature is on and we're actively following one of our missiles.
-            if (!_autoReturnEnabled.Value || _cursor < 0)
+            // Only relevant while the feature is on and the camera is on a missile view (not cockpit).
+            if (!_autoReturnEnabled.Value || !_following)
             {
                 _autoReturnAt = -1f;
                 return;
@@ -570,6 +617,45 @@ namespace MissileCamNO
             cam.SetFollowingUnit(aircraft);      // follow our own aircraft again
             cam.SwitchState(cam.cockpitState);   // restore the normal cockpit view
         }
+
+        internal static bool IsFireHeld()
+        {
+            // [CONFIRMED] the aircraft trigger is the Rewired action "Fire" on player 0, exposed as
+            // GameManager.playerInput (see PilotPlayerState which reads player.GetButton("Fire")).
+            var input = GameManager.playerInput;
+            return input != null && input.GetButton("Fire");
+        }
+
+        /// <summary>
+        /// Keeps the local aircraft's radar-jamming pod firing while the camera is away from the
+        /// cockpit. Jamming pods (JammingPod : Weapon) disable themselves every frame they are not
+        /// re-fired, so simply holding the trigger stops working once the game gates fire input
+        /// (e.g. the orbit-camera cursor safety). We reproduce the exact trigger-hold path, but only
+        /// when the SELECTED weapon station actually carries a jamming pod, so we never launch
+        /// missiles or fire guns by accident. Returns true if a jamming pod was kept active.
+        /// </summary>
+        internal static bool KeepJammingActive(Aircraft? aircraft)
+        {
+            var wm = aircraft?.weaponManager;
+            if (wm == null) return false;
+            var station = wm.currentWeaponStation;
+            if (station == null || !StationHasJammingPod(station)) return false;
+
+            // [CONFIRMED] identical to what PilotPlayerState does on a trigger hold. WeaponManager.Fire
+            // handles safety/ready checks itself; for a jamming pod it routes to WeaponStation.Fire,
+            // which re-arms the pod (JammingPod keeps jamming its own designated target).
+            wm.Fire();
+            return true;
+        }
+
+        private static bool StationHasJammingPod(WeaponStation station)
+        {
+            var weapons = station.Weapons;   // [CONFIRMED] public List<Weapon> WeaponStation.Weapons
+            if (weapons == null) return false;
+            for (int i = 0; i < weapons.Count; i++)
+                if (weapons[i] is JammingPod) return true;   // [CONFIRMED] public class JammingPod : Weapon
+            return false;
+        }
     }
 
     /// <summary>Tracks the local player's own in-flight missiles via the aircraft's launch events.</summary>
@@ -640,9 +726,13 @@ namespace MissileCamNO
 - Your aircraft keeps flying under its current controls the whole time (nothing extra — matches
   "works exactly as it does when selecting on the map").
 - **Incoming‑missile / RWR warnings keep sounding** while you watch a missile (see §14).
+- On EW aircraft (**Medusa / Alkyon**), **holding the Fire trigger keeps your radar‑jamming pod
+  jamming your selected targets** while you follow a missile. Toggle with
+  `[Behavior] KeepJammingWhileFollowing`. Only the *selected* weapon station is re‑fired, and only
+  when it carries a jamming pod, so missiles/guns are never fired by accident (see §14).
 - Everything is gated on a live single‑player mission, so keys do nothing in menus.
 
-### 14. Why the warnings keep playing (confirmed — no code needed)
+### 14. Why the warnings keep playing, and how jamming stays live (confirmed)
 
 The RWR/missile‑warning alarms are `AudioSource`s inside `ThreatList.MissileAlarm`, a **HUD (2D)**
 component, and they're triggered by the **aircraft's** radar/missile‑warning sensors
@@ -650,6 +740,18 @@ component, and they're triggered by the **aircraft's** radar/missile‑warning s
 position. Moving the camera to a missile does not move or mute them. Since we never touch the audio
 path, warnings continue exactly as they do when you open the map today. **You still verify this
 in‑game (§16, step 5).**
+
+**Keeping the jam alive.** A radar‑jamming pod is a `JammingPod : Weapon`. It only jams while it is
+re‑fired **every frame** — its own `LateUpdate` disables it the instant `Fire()` isn't called again
+(`if (lastFired == previousLastFired) enabled = false;`). Normally the pilot input loop
+(`PilotPlayerState.PlayerControls`) does that for you while you hold **Fire**, but that path is
+gated (e.g. by the orbit‑camera cursor / weapon safety) once the camera leaves the cockpit, so the
+jam drops. The mod restores it directly: while you're following a missile and holding Fire, it calls
+the aircraft's own `WeaponManager.Fire()` each frame — but only when the **selected** weapon station
+contains a `JammingPod` (`WeaponStation.Weapons`), so it can never launch a missile or fire a gun.
+The pod keeps jamming whatever target you designated (`Missile`‑style `SetTarget` on the station).
+**Verify in‑game (§16):** in a Medusa/Alkyon, lock a target, select the jamming pod, follow one of
+your missiles, hold Fire — the target's radar should stay jammed.
 
 ---
 
@@ -924,11 +1026,18 @@ DLL metadata; `hash` = full `sha256:` digest.
 - Units: `UnitRegistry.allUnits`; `Unit.NetworkHQ.faction` (`Faction.factionName`); `Unit.persistentID.Id`.
 - RWR audio (why warnings persist): `ThreatList` + inner `ThreatList.MissileAlarm.alarmSource` (2D HUD);
   driven by `aircraft.onRadarWarning` and `aircraft.GetMissileWarningSystem()` events.
+- Weapons / jamming (keep-jamming-while-following): `Aircraft.weaponManager` (`WeaponManager`);
+  `WeaponManager.currentWeaponStation` (`WeaponStation`), `WeaponManager.Fire()`,
+  `WeaponManager.GetTargetList()`; `Unit.weaponStations` (`List<WeaponStation>`);
+  `WeaponStation.Weapons` (`List<Weapon>`), `WeaponStation.Fire(Unit owner, Unit target)`;
+  `JammingPod : Weapon` (re‑fire every frame or its `LateUpdate` disables it);
+  fire input is Rewired action `"Fire"` on `GameManager.playerInput` (`Rewired.Player`, player 0).
 - BepInEx 5 mono: `[BepInPlugin]`, `[BepInProcess("NuclearOption.exe")]`; config keybinds via
   `ConfigEntry<KeyboardShortcut>` + `.Value.IsDown()`; `HideManagerGameObject = true` in `BepInEx.cfg`.
 
 **[VERIFY] against your game version:** all of the above still exist under these names; the
-`cockpitState` field on `CameraStateManager` (used by the return-to-aircraft key).
+`cockpitState` field on `CameraStateManager` (used by the return-to-aircraft key); the `"Fire"`
+Rewired action name and `JammingPod`/`WeaponStation.Weapons` members (used by keep‑jamming).
 
 ---
 

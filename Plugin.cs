@@ -24,11 +24,22 @@ namespace MissileCamNO
         private ConfigEntry<bool> _autoReturnEnabled = null!;
         private ConfigEntry<float> _autoReturnDelay = null!;
 
+        // Keep radar-jamming pods (Medusa/Alkyon) active while following a missile and holding fire.
+        private ConfigEntry<bool> _keepJamming = null!;
+
         private readonly MissileTracker _tracker = new MissileTracker();
         private int _cursor = -1;
 
+        // True while the camera is on a missile view (not the cockpit). Distinct from _cursor, which
+        // is only the index into the live-missile list: _cursor gets reset to -1 when the list is
+        // empty, but we can still be showing the last missile's view and owe an auto-return.
+        private bool _following;
+
         // Scheduled time (Time.time) for the pending auto-return, or a negative value when none is armed.
         private float _autoReturnAt = -1f;
+
+        // Whether we are currently driving the jamming pod (used only to log start/stop transitions).
+        private bool _jamming;
 
         private void Awake()
         {
@@ -53,10 +64,17 @@ namespace MissileCamNO
                 "How long to wait, in seconds, after your last missile is gone before auto-returning " +
                 "to the cockpit. Only used when AutoReturnToCockpit is enabled.");
 
+            _keepJamming = Config.Bind("Behavior", "KeepJammingWhileFollowing",
+                true,
+                "While following one of your missiles, keep your radar-jamming pod (e.g. Medusa or " +
+                "Alkyon) active for as long as you hold the Fire trigger, so you can keep jamming your " +
+                "selected targets. Only affects aircraft that actually carry a jamming pod.");
+
             Log.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} loaded. " +
                         $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}] " +
                         $"Return=[{_returnToAircraft.Value}] " +
-                        $"AutoReturn=[{(_autoReturnEnabled.Value ? $"{_autoReturnDelay.Value:0.#}s" : "off")}].");
+                        $"AutoReturn=[{(_autoReturnEnabled.Value ? $"{_autoReturnDelay.Value:0.#}s" : "off")}] " +
+                        $"KeepJamming=[{(_keepJamming.Value ? "on" : "off")}].");
         }
 
         private void Update()
@@ -66,7 +84,9 @@ namespace MissileCamNO
             {
                 _tracker.DetachIfNeeded(null);
                 _cursor = -1;
+                _following = false;
                 _autoReturnAt = -1f;
+                _jamming = false;
                 return;
             }
 
@@ -77,6 +97,10 @@ namespace MissileCamNO
             if (_cycleNext.Value.IsDown()) Cycle(+1);
             else if (_cyclePrev.Value.IsDown()) Cycle(-1);
             else if (_returnToAircraft.Value.IsDown()) ReturnToAircraft();
+
+            // While following a missile, keep a held-trigger jamming pod firing (EW aircraft). This
+            // must run every frame the trigger is held, since the pod disables itself otherwise.
+            UpdateJamming(aircraft);
 
             // Check the auto-return timer only about once a second (every 60 frames). A ~1s delay in
             // returning is imperceptible, and this keeps the per-frame work out of the hot path.
@@ -95,10 +119,13 @@ namespace MissileCamNO
             {
                 Log.LogInfo("No in-flight missiles of yours to follow.");
                 _cursor = -1;
+                // Intentionally keep _following as-is: if we were already watching a missile that
+                // has since detonated, a pending auto-return must still fire (don't cancel it here).
                 return;
             }
 
             _cursor = ((_cursor + direction) % missiles.Count + missiles.Count) % missiles.Count;
+            _following = true;
             GameBridge.FollowUnit(missiles[_cursor]);
             Log.LogInfo($"Following missile {_cursor + 1}/{missiles.Count}. " +
                         $"Press [{_returnToAircraft.Value}] to return to your aircraft.");
@@ -108,16 +135,31 @@ namespace MissileCamNO
         {
             GameBridge.ReturnToAircraft();
             _cursor = -1;   // next cycle starts from the first missile again
+            _following = false;
             _autoReturnAt = -1f;
             Log.LogInfo("Returned to your aircraft.");
+        }
+
+        // Keeps the jamming pod alive while following a missile and holding the trigger. Runs every
+        // frame (unthrottled) because a jamming pod disables itself the moment it isn't re-fired.
+        private void UpdateJamming(Aircraft? aircraft)
+        {
+            bool jamming = _keepJamming.Value
+                           && _following
+                           && GameBridge.IsFireHeld()
+                           && GameBridge.KeepJammingActive(aircraft);
+
+            if (jamming && !_jamming)
+                Log.LogInfo("Keeping your radar-jamming pod active while following (hold Fire).");
+            _jamming = jamming;
         }
 
         // Arms a short countdown once we're following a missile and none of ours remain in flight,
         // then snaps back to the cockpit when it elapses. Any new/remaining missile cancels it.
         private void UpdateAutoReturn()
         {
-            // Only relevant while the feature is on and we're actively following one of our missiles.
-            if (!_autoReturnEnabled.Value || _cursor < 0)
+            // Only relevant while the feature is on and the camera is on a missile view (not cockpit).
+            if (!_autoReturnEnabled.Value || !_following)
             {
                 _autoReturnAt = -1f;
                 return;

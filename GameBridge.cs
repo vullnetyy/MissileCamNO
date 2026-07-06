@@ -43,6 +43,45 @@ namespace MissileCamNO
             cam.SetFollowingUnit(aircraft);      // follow our own aircraft again
             cam.SwitchState(cam.cockpitState);   // restore the normal cockpit view
         }
+
+        internal static bool IsFireHeld()
+        {
+            // [CONFIRMED] the aircraft trigger is the Rewired action "Fire" on player 0, exposed as
+            // GameManager.playerInput (see PilotPlayerState which reads player.GetButton("Fire")).
+            var input = GameManager.playerInput;
+            return input != null && input.GetButton("Fire");
+        }
+
+        /// <summary>
+        /// Keeps the local aircraft's radar-jamming pod firing while the camera is away from the
+        /// cockpit. Jamming pods (JammingPod : Weapon) disable themselves every frame they are not
+        /// re-fired, so simply holding the trigger stops working once the game gates fire input
+        /// (e.g. the orbit-camera cursor safety). We reproduce the exact trigger-hold path, but only
+        /// when the SELECTED weapon station actually carries a jamming pod, so we never launch
+        /// missiles or fire guns by accident. Returns true if a jamming pod was kept active.
+        /// </summary>
+        internal static bool KeepJammingActive(Aircraft? aircraft)
+        {
+            var wm = aircraft?.weaponManager;
+            if (wm == null) return false;
+            var station = wm.currentWeaponStation;
+            if (station == null || !StationHasJammingPod(station)) return false;
+
+            // [CONFIRMED] identical to what PilotPlayerState does on a trigger hold. WeaponManager.Fire
+            // handles safety/ready checks itself; for a jamming pod it routes to WeaponStation.Fire,
+            // which re-arms the pod (JammingPod keeps jamming its own designated target).
+            wm.Fire();
+            return true;
+        }
+
+        private static bool StationHasJammingPod(WeaponStation station)
+        {
+            var weapons = station.Weapons;   // [CONFIRMED] public List<Weapon> WeaponStation.Weapons
+            if (weapons == null) return false;
+            for (int i = 0; i < weapons.Count; i++)
+                if (weapons[i] is JammingPod) return true;   // [CONFIRMED] public class JammingPod : Weapon
+            return false;
+        }
     }
 
     /// <summary>Tracks the local player's own in-flight missiles via the aircraft's launch events.</summary>
