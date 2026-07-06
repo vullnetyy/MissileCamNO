@@ -24,7 +24,7 @@ Fire a missile, hit the "\[" or "\]" key, and the camera follows it. Cycle throu
 
 Prefer different keys? Two easy ways:
 
-- **Config file:** Open `Nuclear Option\BepInEx\config\MissileFollowCam.cfg`, find the `[Controls]` section, change the key names (e.g. `ReturnToAircraft = Semicolon`), save, and restart the game.
+- **Config file:** Open `Nuclear Option\BepInEx\config\MissileCamNO.cfg`, find the `[Controls]` section, change the key names (e.g. `ReturnToAircraft = Semicolon`), save, and restart the game.
 - **In game:** Install the **BepInEx Configuration Manager** plugin, press **F1** in game, find *Missile Follow Cam*, and click a key to rebind it.
 
 ## Notes

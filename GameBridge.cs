@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-namespace MissileFollowCam
+namespace MissileCamNO
 {
     /// <summary>All game-version-specific calls live here. Fix game updates in this file only.</summary>
     internal static class GameBridge
