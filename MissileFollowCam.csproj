@@ -4,8 +4,8 @@
     <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <AssemblyName>MissileFollowCam</AssemblyName>
-    <Product>Missile Follow Cam</Product>
+    <AssemblyName>MissileCamNO</AssemblyName>
+    <Product>Missile Follow Camera Mod for Nuclear Option</Product>
     <!-- Flows into DLL metadata AND BepInPlugin version. NOMNOM requires the manifest
          modVersion to MATCH this exactly. -->
     <Version>1.0.2</Version>
