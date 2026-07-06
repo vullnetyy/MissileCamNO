@@ -12,9 +12,12 @@ namespace MissileFollowCam
     {
         internal static ManualLogSource Log = null!;
 
-        // Two cycle keys. Return-to-cockpit uses the game's native camera key (L), not a key here.
+        // Two cycle keys plus a return-to-aircraft key. All are configurable in the game's BepInEx
+        // config menu. The game's native "Switch View" key (L) is left untouched, so it still cycles
+        // through the followed missile's camera angles.
         private ConfigEntry<KeyboardShortcut> _cycleNext = null!;
         private ConfigEntry<KeyboardShortcut> _cyclePrev = null!;
+        private ConfigEntry<KeyboardShortcut> _returnToAircraft = null!;
 
         private readonly MissileTracker _tracker = new MissileTracker();
         private int _cursor = -1;
@@ -29,9 +32,13 @@ namespace MissileFollowCam
             _cyclePrev = Config.Bind("Controls", "CyclePreviousMissile",
                 new KeyboardShortcut(KeyCode.LeftBracket),    // default [
                 "Follow the PREVIOUS of your in-flight missiles.");
+            _returnToAircraft = Config.Bind("Controls", "ReturnToAircraft",
+                new KeyboardShortcut(KeyCode.Semicolon),      // default ;
+                "Return the camera to your aircraft's cockpit view.");
 
             Log.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} loaded. " +
-                        $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}]. Press L to return to cockpit.");
+                        $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}] " +
+                        $"Return=[{_returnToAircraft.Value}].");
         }
 
         private void Update()
@@ -50,10 +57,12 @@ namespace MissileFollowCam
 
             if (_cycleNext.Value.IsDown()) Cycle(+1);
             else if (_cyclePrev.Value.IsDown()) Cycle(-1);
+            else if (_returnToAircraft.Value.IsDown()) ReturnToAircraft();
 
             // NOTE: we do NO per-frame camera override. We only switch on a keypress, using the
-            // game's own follow path. That leaves the native camera key (L) free to return you to
-            // the cockpit, and never touches the (aircraft-driven, 2D) RWR/warning audio path.
+            // game's own follow path. The native "Switch View" key (L) is left free to cycle the
+            // followed missile's camera angles, and we never touch the (aircraft-driven, 2D)
+            // RWR/warning audio path.
         }
 
         private void Cycle(int direction)
@@ -68,7 +77,15 @@ namespace MissileFollowCam
 
             _cursor = ((_cursor + direction) % missiles.Count + missiles.Count) % missiles.Count;
             GameBridge.FollowUnit(missiles[_cursor]);
-            Log.LogInfo($"Following missile {_cursor + 1}/{missiles.Count}. Press L to return to cockpit.");
+            Log.LogInfo($"Following missile {_cursor + 1}/{missiles.Count}. " +
+                        $"Press [{_returnToAircraft.Value}] to return to your aircraft.");
+        }
+
+        private void ReturnToAircraft()
+        {
+            GameBridge.ReturnToAircraft();
+            _cursor = -1;   // next cycle starts from the first missile again
+            Log.LogInfo("Returned to your aircraft.");
         }
     }
 }

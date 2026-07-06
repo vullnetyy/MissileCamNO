@@ -26,8 +26,22 @@ namespace MissileFollowCam
             if (cam == null || unit == null) return;
             cam.SetFollowingUnit(unit);        // point the camera at this missile
             cam.SwitchState(cam.orbitState);   // orbit/follow it, just like a map selection
-            // Returning to the cockpit is the game's native camera key (L): it cycles the view
-            // state and restores your aircraft view. No code needed here.
+            // While following the missile, the game's native "Switch View" key (L) still cycles
+            // through the missile's camera angles. Returning to the aircraft is done explicitly
+            // via ReturnToAircraft() below (bound to a configurable key), because the native key
+            // only cycles views of whatever unit is currently followed.
+        }
+
+        internal static void ReturnToAircraft()
+        {
+            // Point the camera back at the local player's aircraft and snap to the cockpit view.
+            // [CONFIRMED] CameraStateManager.cockpitState (CameraCockpitState) + SetFollowingUnit/SwitchState.
+            var cam = SceneSingleton<CameraStateManager>.i;
+            if (cam == null) return;
+            var aircraft = GetLocalAircraft();
+            if (aircraft == null) return;
+            cam.SetFollowingUnit(aircraft);      // follow our own aircraft again
+            cam.SwitchState(cam.cockpitState);   // restore the normal cockpit view
         }
     }
 

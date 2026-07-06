@@ -2,8 +2,8 @@
 
 > A single, sequential, copy‑paste‑able guide that takes you from an empty Windows 11 machine to
 > a **published** Nuclear Option mod that lets you **cycle through and follow your own in‑flight
-> missiles while flying**, keep hearing incoming‑missile warnings the whole time, and return to
-> the cockpit with the game's native camera key (**L**).
+> missiles while flying**, keep hearing incoming‑missile warnings the whole time, and snap the
+> camera back to your aircraft's cockpit with a **configurable key (default `;`)**.
 >
 > **Reader:** senior software engineer, comfortable with the terminal, new to Unity/BepInEx.
 > **Toolchain:** VS Code + .NET SDK CLI. **OS:** Windows 11. **Game:** Steam. **NOMM:** already installed.
@@ -86,7 +86,9 @@ Verified in real community mod source: clicking a unit on the tactical map makes
 orbit/follow it via `CameraStateManager.SetFollowingUnit(unit)` + `SwitchState(...)`. Your mod
 calls that **same API** for your own in‑flight missiles, on a keypress, while you fly. Because you
 reuse the game's own camera path:
-- the native camera key (**L**) returns you to the cockpit with no extra code, and
+- while following a missile, the native camera key (**L**) still cycles through that missile's
+  camera angles; a **dedicated configurable key (default `;`)** points the camera back at your
+  aircraft's cockpit, and
 - **RWR / missile‑warning audio keeps playing** (those alarms are 2D HUD audio driven by the
   aircraft's sensors, not tied to the camera — confirmed below).
 
@@ -96,7 +98,7 @@ You are essentially writing an enhanced sibling of an existing mod. Read these b
 
 | Repo | Why it matters |
 |---|---|
-| **`Mursisru/MissileHoldCam`** | **The closest existing mod**: hold a key → camera follows your launched missile → release restores. Uses the exact `CameraStateManager` + `onRegisterMissile` + `GameManager.GetLocalAircraft` API you need. Your version differs: two keys to cycle forward/back through *multiple* in‑flight missiles, and return via native **L**. |
+| **`Mursisru/MissileHoldCam`** | **The closest existing mod**: hold a key → camera follows your launched missile → release restores. Uses the exact `CameraStateManager` + `onRegisterMissile` + `GameManager.GetLocalAircraft` API you need. Your version differs: two keys to cycle forward/back through *multiple* in‑flight missiles, and a dedicated key (default `;`) to return to your aircraft. |
 | **`AlEX-FRiT/My-NO-Mods`** | ThirdEyeMod (orbit cam), MouseAimMod — great `CameraStateManager` / camera‑state patch examples. |
 | **`mkualquiera/MKModsNO`** | Missile voice warnings — shows `ThreatList`, `MissileWarning`, `InterfaceAudio` (RWR audio). |
 | **`lunaboards-dev/Nuclear-Option-Extensions`** | Custom RWR display, MAW sound override — RWR audio internals. |
@@ -345,13 +347,15 @@ right‑click **Analyze**):
 | Missile alive flag | `Unit.disabled` (bool; true once detonated) | **[CONFIRMED]** |
 | All units (fallback enum) | `UnitRegistry.allUnits` (iterable of `Unit`; contains missiles) | **[CONFIRMED]** |
 | RWR alarm audio | `ThreatList` + inner `ThreatList.MissileAlarm.alarmSource` (2D HUD audio) | **[CONFIRMED]** |
-| Return‑to‑cockpit key | The game's native "Switch View" (default **L**) — verify in game Settings → Controls | **[CONFIRMED]** |
+| Cockpit camera state | `CameraStateManager.cockpitState` (a `CameraCockpitState`) | **[CONFIRMED]** |
+| Follow-the-cockpit switch | `SetFollowingUnit(localAircraft)` + `SwitchState(cockpitState)` | **[CONFIRMED]** |
 
-> **Cockpit‑state field name:** only `orbitState` is confirmed as a named field on
-> `CameraStateManager`. If you later want to force the view back to the cockpit in code
-> (instead of relying on the native **L** key), Analyze `CameraCockpitState` → **Instantiated By**
-> to find the manager field/method that switches to it. For this mod we rely on the native key,
-> so you don't need it.
+> **Return to the aircraft:** while following a missile, the game's native "Switch View" key
+> (default **L**) only cycles camera angles of the *currently followed unit* — i.e. the missile —
+> so it never gets you back to the plane. To return, the mod explicitly calls
+> `SetFollowingUnit(localAircraft)` + `SwitchState(cockpitState)` on a dedicated configurable key
+> (default `;`). Both `cockpitState` and `orbitState` are confirmed named fields on
+> `CameraStateManager`.
 
 If any **[CONFIRMED]** row is missing/renamed in your version, note the new name — you'll only ever
 edit it in **one file** (`GameBridge.cs`, Part D).
@@ -380,9 +384,12 @@ namespace MissileFollowCam
     {
         internal static ManualLogSource Log = null!;
 
-        // Two cycle keys. Return-to-cockpit uses the game's native camera key (L), not a key here.
+        // Two cycle keys plus a return-to-aircraft key. All are configurable in the game's BepInEx
+        // config menu. The game's native "Switch View" key (L) is left untouched, so it still cycles
+        // through the followed missile's camera angles.
         private ConfigEntry<KeyboardShortcut> _cycleNext = null!;
         private ConfigEntry<KeyboardShortcut> _cyclePrev = null!;
+        private ConfigEntry<KeyboardShortcut> _returnToAircraft = null!;
 
         private readonly MissileTracker _tracker = new MissileTracker();
         private int _cursor = -1;
@@ -397,9 +404,13 @@ namespace MissileFollowCam
             _cyclePrev = Config.Bind("Controls", "CyclePreviousMissile",
                 new KeyboardShortcut(KeyCode.LeftBracket),    // default [
                 "Follow the PREVIOUS of your in-flight missiles.");
+            _returnToAircraft = Config.Bind("Controls", "ReturnToAircraft",
+                new KeyboardShortcut(KeyCode.Semicolon),      // default ;
+                "Return the camera to your aircraft's cockpit view.");
 
             Log.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} loaded. " +
-                        $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}]. Press L to return to cockpit.");
+                        $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}] " +
+                        $"Return=[{_returnToAircraft.Value}].");
         }
 
         private void Update()
@@ -418,10 +429,12 @@ namespace MissileFollowCam
 
             if (_cycleNext.Value.IsDown()) Cycle(+1);
             else if (_cyclePrev.Value.IsDown()) Cycle(-1);
+            else if (_returnToAircraft.Value.IsDown()) ReturnToAircraft();
 
             // NOTE: we do NO per-frame camera override. We only switch on a keypress, using the
-            // game's own follow path. That leaves the native camera key (L) free to return you to
-            // the cockpit, and never touches the (aircraft-driven, 2D) RWR/warning audio path.
+            // game's own follow path. The native "Switch View" key (L) is left free to cycle the
+            // followed missile's camera angles, and we never touch the (aircraft-driven, 2D)
+            // RWR/warning audio path.
         }
 
         private void Cycle(int direction)
@@ -436,7 +449,15 @@ namespace MissileFollowCam
 
             _cursor = ((_cursor + direction) % missiles.Count + missiles.Count) % missiles.Count;
             GameBridge.FollowUnit(missiles[_cursor]);
-            Log.LogInfo($"Following missile {_cursor + 1}/{missiles.Count}. Press L to return to cockpit.");
+            Log.LogInfo($"Following missile {_cursor + 1}/{missiles.Count}. " +
+                        $"Press [{_returnToAircraft.Value}] to return to your aircraft.");
+        }
+
+        private void ReturnToAircraft()
+        {
+            GameBridge.ReturnToAircraft();
+            _cursor = -1;   // next cycle starts from the first missile again
+            Log.LogInfo("Returned to your aircraft.");
         }
     }
 }
@@ -473,8 +494,22 @@ namespace MissileFollowCam
             if (cam == null || unit == null) return;
             cam.SetFollowingUnit(unit);        // point the camera at this missile
             cam.SwitchState(cam.orbitState);   // orbit/follow it, just like a map selection
-            // Returning to the cockpit is the game's native camera key (L): it cycles the view
-            // state and restores your aircraft view. No code needed here.
+            // While following the missile, the game's native "Switch View" key (L) still cycles
+            // through the missile's camera angles. Returning to the aircraft is done explicitly
+            // via ReturnToAircraft() below (bound to a configurable key), because the native key
+            // only cycles views of whatever unit is currently followed.
+        }
+
+        internal static void ReturnToAircraft()
+        {
+            // Point the camera back at the local player's aircraft and snap to the cockpit view.
+            // [CONFIRMED] CameraStateManager.cockpitState (CameraCockpitState) + SetFollowingUnit/SwitchState.
+            var cam = SceneSingleton<CameraStateManager>.i;
+            if (cam == null) return;
+            var aircraft = GetLocalAircraft();
+            if (aircraft == null) return;
+            cam.SetFollowingUnit(aircraft);      // follow our own aircraft again
+            cam.SwitchState(cam.cockpitState);   // restore the normal cockpit view
         }
     }
 
@@ -535,7 +570,10 @@ namespace MissileFollowCam
 
 - `]` / `[` cycle forward/back through **your** in‑flight missiles and follow the selected one via
   the game's own camera path — identical to selecting it on the map.
-- The game's native **L** returns you to the cockpit (verify your bind in Settings → Controls).
+- While following a missile, the game's native **L** ("Switch View") cycles through that missile's
+  camera angles.
+- `;` (configurable) snaps the camera back to **your aircraft's cockpit** via
+  `SetFollowingUnit(localAircraft)` + `SwitchState(cockpitState)`.
 - Your aircraft keeps flying under its current controls the whole time (nothing extra — matches
   "works exactly as it does when selecting on the map").
 - **Incoming‑missile / RWR warnings keep sounding** while you watch a missile (see §14).
@@ -618,8 +656,9 @@ powershell -ExecutionPolicy Bypass -File .\build-and-launch.ps1
 3. Press `]` → camera follows your missile (like a map selection).
 4. Press `]` / `[` to cycle when several are airborne.
 5. Provoke your RWR (fly near a threat that locks you) → confirm you **still hear the warning** while following.
-6. Press **L** → confirm you return to the cockpit.
-7. Watch the console for exceptions — every game‑call issue points back to `GameBridge.cs`.
+6. While following a missile, press **L** → confirm it cycles the missile's camera angles.
+7. Press `;` → confirm the camera snaps back to your aircraft's cockpit.
+8. Watch the console for exceptions — every game‑call issue points back to `GameBridge.cs`.
 
 Edit → re‑run the script to iterate. No need to reinstall BepInEx between runs.
 
@@ -750,7 +789,7 @@ Fork **https://github.com/KopterBuzz/NOMNOM**. In `modManifests/`, add `MissileF
 {
   "id": "MissileFollowCam",
   "name": "Missile Follow Cam",
-  "description": "Cycle through and follow your own in-flight missiles while flying. RWR/missile warnings keep playing; press your camera key (L) to return to the cockpit.",
+  "description": "Cycle through and follow your own in-flight missiles while flying. RWR/missile warnings keep playing; press ; (configurable) to snap the camera back to your aircraft's cockpit.",
   "tags": ["QoL"],
   "urls": [
     { "name": "info", "url": "https://github.com/<YOUR_GITHUB_USERNAME>/MissileFollowCam" }
@@ -795,8 +834,8 @@ DLL metadata; `hash` = full `sha256:` digest.
 | `dotnet build` can't find `Assembly-CSharp` | Wrong `<GameDir>`/`<ManagedDir>` in `.csproj`. |
 | Compile error: "type from assembly 'Mirage'/'Rewired_Core'/'UniTask' not referenced" | Those `<Reference>` lines are missing/paths wrong — they're in the provided `.csproj`. |
 | Build errors on `internal`/`private` members | Ensure `<Publicize Include="Assembly-CSharp" />` and `<Publicize>true</Publicize>` are present. |
-| Camera won't switch | Re‑verify `SetFollowingUnit`/`SwitchState`/`orbitState` names in ILSpy (Part C) and update `GameBridge.cs`. |
-| `L` doesn't return to cockpit | Check your in‑game "Switch View" bind; or add an explicit restore by finding the cockpit‑state field (Part C note). |
+| Camera won't switch | Re‑verify `SetFollowingUnit`/`SwitchState`/`orbitState`/`cockpitState` names in ILSpy (Part C) and update `GameBridge.cs`. |
+| `;` doesn't return to the aircraft | Re‑verify `cockpitState` in ILSpy; make sure the `ReturnToAircraft` bind isn't shared with another control. |
 | Cycles include allied AI missiles | Shouldn't happen — the tracker uses your aircraft's own launch events + `Missile.owner`. If it does, tighten `EnsureAttached`'s seed to `m.owner == _aircraft` (already done). |
 | Warnings go silent while following | You'd only see this if you moved the main AudioListener — this mod doesn't. Re‑verify you're on the game's follow path (§14). |
 | CI fails on `Assembly-CSharp` | Hosted runner has no game DLLs — use self‑hosted (19a) or private refs (19b). |
@@ -811,7 +850,8 @@ DLL metadata; `hash` = full `sha256:` digest.
 
 - Namespaces: gameplay types are **global**; `Player`/`BasePlayer` in `NuclearOption.Networking`.
 - Camera: `SceneSingleton<CameraStateManager>.i`; `SetFollowingUnit(Unit)`; `SwitchState(CameraBaseState)`;
-  field `orbitState` (`CameraOrbitState`); `mainCamera`; `cameraMode` (`CameraMode`: `cockpit`, `orbit`);
+  fields `orbitState` (`CameraOrbitState`) and `cockpitState` (`CameraCockpitState`); `mainCamera`;
+  `cameraMode` (`CameraMode`: `cockpit`, `orbit`);
   states `CameraCockpitState`/`CameraChaseState`/`CameraOrbitState`/`CameraSelectionState`/… .
 - Player/aircraft: `GameManager.GetLocalAircraft(out Aircraft)`; `GameManager.IsLocalAircraft(Unit)`;
   `GameManager.gameState` (`GameState.SinglePlayer`/`.Multiplayer`); `GameManager.flightControlsEnabled`.
@@ -824,9 +864,8 @@ DLL metadata; `hash` = full `sha256:` digest.
 - BepInEx 5 mono: `[BepInPlugin]`, `[BepInProcess("NuclearOption.exe")]`; config keybinds via
   `ConfigEntry<KeyboardShortcut>` + `.Value.IsDown()`; `HideManagerGameObject = true` in `BepInEx.cfg`.
 
-**[VERIFY] against your game version:** all of the above still exist under these names; your native
-"Switch View" (return‑to‑cockpit) keybind; the cockpit‑state field name (only if you add code‑driven
-restore instead of relying on **L**).
+**[VERIFY] against your game version:** all of the above still exist under these names; the
+`cockpitState` field on `CameraStateManager` (used by the return-to-aircraft key).
 
 ---
 
