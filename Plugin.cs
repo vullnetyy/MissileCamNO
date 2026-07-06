@@ -94,9 +94,9 @@ namespace MissileCamNO
             var aircraft = GameBridge.GetLocalAircraft();
             _tracker.EnsureAttached(aircraft);
 
-            if (_cycleNext.Value.IsDown()) Cycle(+1);
-            else if (_cyclePrev.Value.IsDown()) Cycle(-1);
-            else if (_returnToAircraft.Value.IsDown()) ReturnToAircraft();
+            if (Pressed(_cycleNext)) Cycle(+1);
+            else if (Pressed(_cyclePrev)) Cycle(-1);
+            else if (Pressed(_returnToAircraft)) ReturnToAircraft();
 
             // While following a missile, keep a held-trigger jamming pod firing (EW aircraft). This
             // must run every frame the trigger is held, since the pod disables itself otherwise.
@@ -138,6 +138,19 @@ namespace MissileCamNO
             _following = false;
             _autoReturnAt = -1f;
             Log.LogInfo("Returned to your aircraft.");
+        }
+
+        // BepInEx's KeyboardShortcut.IsDown() runs a strict modifier test that also fails if ANY other
+        // (non-mouse) key is held down. That means holding the Fire trigger (a keyboard/joystick bind)
+        // blocks our hotkeys. We instead check just the configured main key + required modifiers, so
+        // our keys fire regardless of what else is held - exactly like the game's own Map (M) toggle.
+        private static bool Pressed(ConfigEntry<KeyboardShortcut> shortcut)
+        {
+            var sc = shortcut.Value;
+            if (sc.MainKey == KeyCode.None || !Input.GetKeyDown(sc.MainKey)) return false;
+            foreach (var modifier in sc.Modifiers)
+                if (!Input.GetKey(modifier)) return false;
+            return true;
         }
 
         // Keeps the jamming pod alive while following a missile and holding the trigger. Runs every
