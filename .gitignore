@@ -1,0 +1,12 @@
+bin/
+obj/
+.vscode/
+# NEVER commit proprietary game assemblies to a public repo:
+*Assembly-CSharp*.dll
+UnityEngine*.dll
+Mirage.dll
+Rewired_Core.dll
+UniTask.dll
+lib/game/
+Thumbs.db
+.DS_Store

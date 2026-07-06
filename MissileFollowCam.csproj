@@ -1,0 +1,57 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MissileFollowCam</AssemblyName>
+    <Product>Missile Follow Cam</Product>
+    <!-- Flows into DLL metadata AND BepInPlugin version. NOMNOM requires the manifest
+         modVersion to MATCH this exactly. -->
+    <Version>1.0.0</Version>
+
+    <!-- EDIT THIS to your Part A/5 path. CI can override via the GAME_MANAGED env var. -->
+    <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Nuclear Option</GameDir>
+    <ManagedDir>$(GameDir)\NuclearOption_Data\Managed</ManagedDir>
+    <ManagedDir Condition="'$(GAME_MANAGED)' != ''">$(GAME_MANAGED)</ManagedDir>
+
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+    <!-- Lets net472 build with the modern dotnet CLI (no dev pack needed). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Auto-generates MyPluginInfo (GUID/NAME/VERSION) from csproj metadata. -->
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
+    <!-- Publicizes private/internal game members so you can read them without reflection.
+         (Harmless if members are already public.) -->
+    <PackageReference Include="Krafs.Publicizer" Version="2.2.1" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Publicize Include="Assembly-CSharp" />
+  </ItemGroup>
+
+  <!-- Reference the game DLLs directly. Private=false => NEVER copy proprietary DLLs to output/repo. -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+      <Publicize>true</Publicize>
+    </Reference>
+
+    <!-- Some public members of Aircraft/Missile/Unit reference these assemblies in their
+         signatures, so the compiler needs them referenced even if you don't call them directly. -->
+    <Reference Include="Mirage">        <HintPath>$(ManagedDir)\Mirage.dll</HintPath>        <Private>false</Private></Reference>
+    <Reference Include="Rewired_Core">  <HintPath>$(ManagedDir)\Rewired_Core.dll</HintPath>  <Private>false</Private></Reference>
+    <Reference Include="UniTask">       <HintPath>$(ManagedDir)\UniTask.dll</HintPath>       <Private>false</Private></Reference>
+
+    <Reference Include="UnityEngine">                   <HintPath>$(ManagedDir)\UnityEngine.dll</HintPath>                   <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule">        <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>        <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule">     <HintPath>$(ManagedDir)\UnityEngine.PhysicsModule.dll</HintPath>     <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"> <HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath> <Private>false</Private></Reference>
+    <Reference Include="UnityEngine.AudioModule">       <HintPath>$(ManagedDir)\UnityEngine.AudioModule.dll</HintPath>       <Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>

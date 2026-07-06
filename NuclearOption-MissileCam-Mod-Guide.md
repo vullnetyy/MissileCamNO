@@ -11,6 +11,49 @@
 
 ---
 
+## Table of Contents
+
+- [0. Read this first (5 minutes that save you hours)](#0-read-this-first-5-minutes-that-save-you-hours)
+  - [The feature is basically a "select unit on map → follow it" call, invoked from the cockpit](#the-feature-is-basically-a-select-unit-on-map--follow-it-call-invoked-from-the-cockpit)
+  - [Study these real mods (your best reference material)](#study-these-real-mods-your-best-reference-material)
+  - [Legend](#legend)
+- [Part A — Environment setup (Windows 11)](#part-a--environment-setup-windows-11)
+  - [1. Install the .NET SDK](#1-install-the-net-sdk)
+  - [2. Install VS Code + C#](#2-install-vs-code--c)
+  - [3. Install a decompiler (you'll live in this to verify class names)](#3-install-a-decompiler-youll-live-in-this-to-verify-class-names)
+  - [4. Install Git](#4-install-git)
+  - [5. Find your game folder](#5-find-your-game-folder)
+  - [6. Install BepInEx 5 via NOMM (you have NOMM)](#6-install-bepinex-5-via-nomm-you-have-nomm)
+  - [7. Configure BepInEx (console + a required setting)](#7-configure-bepinex-console--a-required-setting)
+- [Part B — Create the project](#part-b--create-the-project)
+  - [8. Scaffold](#8-scaffold)
+  - [9. The `.csproj` (edit only the two `<GameDir>` lines)](#9-the-csproj-edit-only-the-two-gamedir-lines)
+  - [10. `.gitignore`](#10-gitignore)
+- [Part C — Verify the game API (mandatory, ~20–30 min)](#part-c--verify-the-game-api-mandatory-2030-min)
+- [Part D — Write the mod](#part-d--write-the-mod)
+  - [11. `Plugin.cs` — entry point, config, input loop](#11-plugincs--entry-point-config-input-loop)
+  - [12. `GameBridge.cs` — the single file that touches the game](#12-gamebridgecs--the-single-file-that-touches-the-game)
+  - [13. Behavior recap (what you built)](#13-behavior-recap-what-you-built)
+  - [14. Why the warnings keep playing (confirmed — no code needed)](#14-why-the-warnings-keep-playing-confirmed--no-code-needed)
+- [Part E — Local build + test automation](#part-e--local-build--test-automation)
+  - [15. First build](#15-first-build)
+  - [16. One‑command build → deploy → launch → tail logs](#16-onecommand-build--deploy--launch--tail-logs)
+  - [17. Test loop](#17-test-loop)
+- [Part F — CI: automated release pipeline (GitHub Actions)](#part-f--ci-automated-release-pipeline-github-actions)
+  - [18. Create the public repo](#18-create-the-public-repo)
+  - [19a. Option 1 — self‑hosted runner (recommended)](#19a-option-1--selfhosted-runner-recommended)
+  - [19b. Option 2 — hosted runner + private reference DLLs](#19b-option-2--hosted-runner--private-reference-dlls)
+  - [20. Cut a release](#20-cut-a-release)
+- [Part G — Publish to NOMM (via NOMNOM)](#part-g--publish-to-nomm-via-nomnom)
+  - [21. Requirements checklist](#21-requirements-checklist)
+  - [22. Get the release SHA256](#22-get-the-release-sha256)
+  - [23. Add the manifest to NOMNOM](#23-add-the-manifest-to-nomnom)
+  - [24. Submit](#24-submit)
+- [Part H — Troubleshooting](#part-h--troubleshooting)
+- [Part I — Appendix: verified API this mod uses](#part-i--appendix-verified-api-this-mod-uses)
+
+---
+
 ## 0. Read this first (5 minutes that save you hours)
 
 Nuclear Option (Steam AppID **2168680**, Shockfront Studios) has **no official mod API**. The
@@ -230,6 +273,30 @@ Replace `MissileFollowCam.csproj` entirely with this:
   </ItemGroup>
 
 </Project>
+```
+
+#### `nuget.config` (required — `BepInEx.*` is not on nuget.org)
+
+`BepInEx.Core` and `BepInEx.PluginInfoProps` are **not** published to nuget.org. Without
+the extra feed below, `dotnet restore` fails with:
+
+```
+error NU1101: Unable to find package BepInEx.Core. No packages exist with this id in source(s): nuget.org
+error NU1101: Unable to find package BepInEx.PluginInfoProps. No packages exist with this id in source(s): nuget.org
+```
+
+Create `nuget.config` next to the `.csproj` to add the official BepInEx feed:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+    <!-- BepInEx.Core and BepInEx.PluginInfoProps are NOT on nuget.org; they live here. -->
+    <add key="BepInEx" value="https://nuget.bepinex.dev/v3/index.json" />
+  </packageSources>
+</configuration>
 ```
 
 Restore:
@@ -724,6 +791,7 @@ DLL metadata; `hash` = full `sha256:` digest.
 
 | Symptom | Fix |
 |---|---|
+| `NU1101: Unable to find package BepInEx.Core` / `BepInEx.PluginInfoProps` | Missing BepInEx feed. Add the `nuget.config` from Part 9, then re‑run `dotnet restore`. |
 | No `MissileFollowCam ... loaded.` in console | DLL not in `BepInEx\plugins`; or BepInEx not installed (re‑run NOMM install + launch once). |
 | `dotnet build` can't find `Assembly-CSharp` | Wrong `<GameDir>`/`<ManagedDir>` in `.csproj`. |
 | Compile error: "type from assembly 'Mirage'/'Rewired_Core'/'UniTask' not referenced" | Those `<Reference>` lines are missing/paths wrong — they're in the provided `.csproj`. |
