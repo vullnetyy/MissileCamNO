@@ -341,12 +341,12 @@ right‑click **Analyze**):
 | Is-local-aircraft check | `GameManager.IsLocalAircraft(Unit)` | **[CONFIRMED]** |
 | Mission live | `MissionManager.IsRunning` (static) | **[CONFIRMED]** |
 | Single vs multi | `GameManager.gameState` → `GameState.SinglePlayer` / `.Multiplayer` | **[CONFIRMED]** |
-| Missile launched/expired events | `Aircraft.onRegisterMissile` / `Aircraft.onDeregisterMissile` (both `Action<Missile>`) | **[CONFIRMED]** |
+| Missile launched/expired events | `Aircraft.onRegisterMissile` / `Aircraft.onDeregisterMissile` (both `Action<Missile>`) | **[NOT FOUND IN ILSPY]** |
 | Missile owner | `Missile.owner` (`Unit`) and `Missile.ownerID` (`PersistentID`) | **[CONFIRMED]** |
-| Missile alive flag | `Missile.disabled` (bool; true once detonated) | **[CONFIRMED]** |
+| Missile alive flag | `Missile.disabled` (bool; true once detonated) | **[NOT FOUND IN ILSPY]** |
 | All units (fallback enum) | `UnitRegistry.allUnits` (iterable of `Unit`; contains missiles) | **[CONFIRMED]** |
 | RWR alarm audio | `ThreatList` + inner `ThreatList.MissileAlarm.alarmSource` (2D HUD audio) | **[CONFIRMED]** |
-| Return‑to‑cockpit key | The game's native "Switch View" (default **L**) — verify in game Settings → Controls | **[VERIFY]** |
+| Return‑to‑cockpit key | The game's native "Switch View" (default **L**) — verify in game Settings → Controls | **[CONFIRMED]** |
 
 > **Cockpit‑state field name:** only `orbitState` is confirmed as a named field on
 > `CameraStateManager`. If you later want to force the view back to the cockpit in code
