@@ -12,7 +12,7 @@ jobs:
       - name: Build (Release)
         run: dotnet build -c Release
       - name: Package
-        shell: pwsh
+        shell: powershell
         run: |
           $ver = "${{ github.ref_name }}".TrimStart('v')
           $out = "MissileFollowCam-$ver"
