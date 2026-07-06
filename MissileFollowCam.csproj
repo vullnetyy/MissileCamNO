@@ -8,7 +8,7 @@
     <Product>Missile Follow Cam</Product>
     <!-- Flows into DLL metadata AND BepInPlugin version. NOMNOM requires the manifest
          modVersion to MATCH this exactly. -->
-    <Version>1.0.0</Version>
+    <Version>1.0.2</Version>
 
     <!-- EDIT THIS to your Part A/5 path. CI can override via the GAME_MANAGED env var. -->
     <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Nuclear Option</GameDir>
