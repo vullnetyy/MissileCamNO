@@ -58,4 +58,9 @@
     <Reference Include="UnityEngine.AudioModule">       <HintPath>$(ManagedDir)\UnityEngine.AudioModule.dll</HintPath>       <Private>false</Private></Reference>
   </ItemGroup>
 
+  <Target Name="DeployToGame" AfterTargets="Build">
+    <PropertyGroup><PluginsDir>$(GameDir)\BepInEx\plugins\$(AssemblyName)</PluginsDir></PropertyGroup>
+    <MakeDir Directories="$(PluginsDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginsDir)" />
+  </Target>
 </Project>
