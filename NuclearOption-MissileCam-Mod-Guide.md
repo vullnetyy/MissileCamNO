@@ -3,7 +3,8 @@
 > A single, sequential, copy‑paste‑able guide that takes you from an empty Windows 11 machine to
 > a **published** Nuclear Option mod that lets you **cycle through and follow your own in‑flight
 > missiles while flying**, keep hearing incoming‑missile warnings the whole time, and snap the
-> camera back to your aircraft's cockpit with a **configurable key (default `;`)**.
+> camera back to your aircraft's cockpit with a **configurable key (default `;`)** — or
+> **automatically, a few seconds after your last missile detonates**.
 >
 > **Reader:** senior software engineer, comfortable with the terminal, new to Unity/BepInEx.
 > **Toolchain:** VS Code + .NET SDK CLI. **OS:** Windows 11. **Game:** Steam. **NOMM:** already installed.
@@ -88,7 +89,9 @@ calls that **same API** for your own in‑flight missiles, on a keypress, while 
 reuse the game's own camera path:
 - while following a missile, the native camera key (**L**) still cycles through that missile's
   camera angles; a **dedicated configurable key (default `;`)** points the camera back at your
-  aircraft's cockpit, and
+  aircraft's cockpit, and the camera also **returns to the cockpit automatically a few seconds
+  (default `3`) after your last in‑flight missile detonates** (both toggle/delay are configurable),
+  and
 - **RWR / missile‑warning audio keeps playing** (those alarms are 2D HUD audio driven by the
   aircraft's sensors, not tied to the camera — confirmed below).
 
@@ -391,8 +394,16 @@ namespace MissileCamNO
         private ConfigEntry<KeyboardShortcut> _cyclePrev = null!;
         private ConfigEntry<KeyboardShortcut> _returnToAircraft = null!;
 
+        // Automatically snap back to the cockpit a few seconds after your last in-flight missile
+        // detonates, so you're not left staring at empty sky. Both configurable.
+        private ConfigEntry<bool> _autoReturnEnabled = null!;
+        private ConfigEntry<float> _autoReturnDelay = null!;
+
         private readonly MissileTracker _tracker = new MissileTracker();
         private int _cursor = -1;
+
+        // Scheduled time (Time.time) for the pending auto-return, or a negative value when none is armed.
+        private float _autoReturnAt = -1f;
 
         private void Awake()
         {
@@ -408,9 +419,19 @@ namespace MissileCamNO
                 new KeyboardShortcut(KeyCode.Semicolon),      // default ;
                 "Return the camera to your aircraft's cockpit view.");
 
+            _autoReturnEnabled = Config.Bind("Behavior", "AutoReturnToCockpit",
+                true,
+                "Automatically return the camera to your aircraft's cockpit shortly after your last " +
+                "in-flight missile detonates (or otherwise despawns).");
+            _autoReturnDelay = Config.Bind("Behavior", "AutoReturnDelaySeconds",
+                3f,
+                "How long to wait, in seconds, after your last missile is gone before auto-returning " +
+                "to the cockpit. Only used when AutoReturnToCockpit is enabled.");
+
             Log.LogInfo($"{MyPluginInfo.PLUGIN_NAME} v{MyPluginInfo.PLUGIN_VERSION} loaded. " +
                         $"Next=[{_cycleNext.Value}] Prev=[{_cyclePrev.Value}] " +
-                        $"Return=[{_returnToAircraft.Value}].");
+                        $"Return=[{_returnToAircraft.Value}] " +
+                        $"AutoReturn=[{(_autoReturnEnabled.Value ? $"{_autoReturnDelay.Value:0.#}s" : "off")}].");
         }
 
         private void Update()
@@ -420,6 +441,7 @@ namespace MissileCamNO
             {
                 _tracker.DetachIfNeeded(null);
                 _cursor = -1;
+                _autoReturnAt = -1f;
                 return;
             }
 
@@ -431,10 +453,14 @@ namespace MissileCamNO
             else if (_cyclePrev.Value.IsDown()) Cycle(-1);
             else if (_returnToAircraft.Value.IsDown()) ReturnToAircraft();
 
-            // NOTE: we do NO per-frame camera override. We only switch on a keypress, using the
-            // game's own follow path. The native "Switch View" key (L) is left free to cycle the
-            // followed missile's camera angles, and we never touch the (aircraft-driven, 2D)
-            // RWR/warning audio path.
+            // Check the auto-return timer only about once a second (every 60 frames). A ~1s delay in
+            // returning is imperceptible, and this keeps the per-frame work out of the hot path.
+            if (Time.frameCount % 60 == 0) UpdateAutoReturn();
+
+            // NOTE: we do NO per-frame camera override. We only switch on a keypress (or the
+            // auto-return timer above), using the game's own follow path. The native "Switch View"
+            // key (L) is left free to cycle the followed missile's camera angles, and we never touch
+            // the (aircraft-driven, 2D) RWR/warning audio path.
         }
 
         private void Cycle(int direction)
@@ -457,7 +483,40 @@ namespace MissileCamNO
         {
             GameBridge.ReturnToAircraft();
             _cursor = -1;   // next cycle starts from the first missile again
+            _autoReturnAt = -1f;
             Log.LogInfo("Returned to your aircraft.");
+        }
+
+        // Arms a short countdown once we're following a missile and none of ours remain in flight,
+        // then snaps back to the cockpit when it elapses. Any new/remaining missile cancels it.
+        private void UpdateAutoReturn()
+        {
+            // Only relevant while the feature is on and we're actively following one of our missiles.
+            if (!_autoReturnEnabled.Value || _cursor < 0)
+            {
+                _autoReturnAt = -1f;
+                return;
+            }
+
+            // Still have missiles in flight? Cancel any pending countdown and keep watching.
+            if (_tracker.LiveMissiles().Count > 0)
+            {
+                _autoReturnAt = -1f;
+                return;
+            }
+
+            // No live missiles left: arm the countdown, then fire once it elapses.
+            if (_autoReturnAt < 0f)
+            {
+                float delay = Mathf.Max(0f, _autoReturnDelay.Value);
+                _autoReturnAt = Time.time + delay;
+                Log.LogInfo($"Last missile gone; returning to your aircraft in {delay:0.#}s.");
+            }
+            else if (Time.time >= _autoReturnAt)
+            {
+                Log.LogInfo("Auto-returning to your aircraft (last missile detonated).");
+                ReturnToAircraft();   // also clears _autoReturnAt
+            }
         }
     }
 }
@@ -574,6 +633,10 @@ namespace MissileCamNO
   camera angles.
 - `;` (configurable) snaps the camera back to **your aircraft's cockpit** via
   `SetFollowingUnit(localAircraft)` + `SwitchState(cockpitState)`.
+- The camera **auto‑returns to the cockpit** on its own a configurable delay (default `3` seconds)
+  after your **last** in‑flight missile detonates/despawns, so you're never stranded on empty sky.
+  Launching or still having another missile in flight cancels the pending return. Toggle it with
+  `[Behavior] AutoReturnToCockpit` and tune the delay with `AutoReturnDelaySeconds`.
 - Your aircraft keeps flying under its current controls the whole time (nothing extra — matches
   "works exactly as it does when selecting on the map").
 - **Incoming‑missile / RWR warnings keep sounding** while you watch a missile (see §14).
