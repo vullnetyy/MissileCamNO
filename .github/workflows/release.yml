@@ -1,0 +1,33 @@
+name: Release
+on:
+  push:
+    tags: [ "v*" ]
+jobs:
+  build-and-release:
+    runs-on: [ self-hosted, windows ]   # your PC; game DLLs are local
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (Release)
+        run: dotnet build -c Release
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          $out = "MissileFollowCam-$ver"
+          New-Item -ItemType Directory -Force -Path dist/$out | Out-Null
+          Copy-Item "bin/Release/MissileFollowCam.dll" "dist/$out/"
+          Copy-Item "README.md" "dist/$out/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$out/*" -DestinationPath "dist/$out.zip" -Force
+          $hash = (Get-FileHash "dist/$out.zip" -Algorithm SHA256).Hash.ToLower()
+          "sha256:$hash" | Tee-Object "dist/$out.zip.sha256.txt"
+          "ZIP=dist/$out.zip"               | Out-File -Append $env:GITHUB_ENV
+          "SHA=dist/$out.zip.sha256.txt"    | Out-File -Append $env:GITHUB_ENV
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ZIP }}
+            ${{ env.SHA }}
+          generate_release_notes: true
