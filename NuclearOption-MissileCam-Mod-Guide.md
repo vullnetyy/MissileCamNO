@@ -248,7 +248,14 @@ Replace `MissileFollowCam.csproj` entirely with this:
   </ItemGroup>
 
   <ItemGroup>
-    <Publicize Include="Assembly-CSharp" />
+    <!-- Publicize the game's private/internal members so we can read them without reflection.
+         IncludeCompilerGeneratedMembers="false" is REQUIRED: several game members are "field-like
+         events" (e.g. Unit.onRegisterMissile / onDeregisterMissile). Each compiles to a public
+         event PLUS a hidden compiler-generated backing field of the SAME name. Publicizing that
+         backing field makes `unit.onRegisterMissile` ambiguous with the public event and the build
+         fails with CS0229. Excluding compiler-generated members keeps the backing fields private;
+         the events stay public, which is all the mod needs. -->
+    <Publicize Include="Assembly-CSharp" IncludeCompilerGeneratedMembers="false" />
   </ItemGroup>
 
   <!-- Reference the game DLLs directly. Private=false => NEVER copy proprietary DLLs to output/repo. -->
@@ -275,15 +282,7 @@ Replace `MissileFollowCam.csproj` entirely with this:
 </Project>
 ```
 
-#### `nuget.config` (required — `BepInEx.*` is not on nuget.org)
-
-`BepInEx.Core` and `BepInEx.PluginInfoProps` are **not** published to nuget.org. Without
-the extra feed below, `dotnet restore` fails with:
-
-```
-error NU1101: Unable to find package BepInEx.Core. No packages exist with this id in source(s): nuget.org
-error NU1101: Unable to find package BepInEx.PluginInfoProps. No packages exist with this id in source(s): nuget.org
-```
+### 10. Add BepInEx nuget feed
 
 Create `nuget.config` next to the `.csproj` to add the official BepInEx feed:
 
@@ -304,7 +303,7 @@ Restore:
 dotnet restore
 ```
 
-### 10. `.gitignore`
+### 11. `.gitignore`
 
 ```gitignore
 bin/

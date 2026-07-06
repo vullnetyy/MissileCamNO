@@ -30,7 +30,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Publicize Include="Assembly-CSharp" />
+    <!-- IncludeCompilerGeneratedMembers="false": don't publicize compiler-generated event
+         backing fields (e.g. Unit.onRegisterMissile). Publicizing them exposes a public field
+         with the same name as the public event, causing CS0229 ambiguity. The events are already
+         public, so we only need real private members publicized. -->
+    <Publicize Include="Assembly-CSharp" IncludeCompilerGeneratedMembers="false" />
   </ItemGroup>
 
   <!-- Reference the game DLLs directly. Private=false => NEVER copy proprietary DLLs to output/repo. -->
