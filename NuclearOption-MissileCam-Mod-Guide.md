@@ -235,7 +235,7 @@ Replace `MissileCamNO.csproj` entirely with this:
     <AssemblyName>MissileCamNO</AssemblyName>
     <Product>Missile Follow Cam</Product>
     <!-- Flows into DLL metadata AND BepInPlugin version. NOMNOM requires the manifest
-         modVersion to MATCH this exactly. -->
+         artifact `version` to MATCH this exactly. -->
     <Version>1.0.0</Version>
 
     <!-- EDIT THIS to your Part A/5 path. CI can override via the GAME_MANAGED env var. -->
@@ -945,15 +945,15 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 The workflow builds, zips `MissileCamNO-1.0.0.zip`, writes the `sha256:` file, and creates the
-Release. **The DLL version must equal the tag** — NOMNOM enforces manifest `modVersion` == DLL
+Release. **The DLL version must equal the tag** — NOMNOM enforces manifest artifact `version` == DLL
 metadata, which you set via `<Version>` in the `.csproj`.
 
 ---
 
 ## Part G — Publish to NOMM (via NOMNOM)
 
-NOMM lists mods from **NOMNOM**. Register once with `autoUpdate:"True"` and NOMNOM auto‑detects your
-**future** releases.
+NOMM lists mods from **NOMNOM**. Register once with `autoUpdateArtifacts:"True"` and NOMNOM
+auto‑detects your **future** releases.
 
 ### 21. Requirements checklist
 - ✅ Public repo, releases for **only this mod**.
@@ -972,39 +972,44 @@ Fork **https://github.com/KopterBuzz/NOMNOM**. In `modManifests/`, add `MissileC
 ```json
 {
   "id": "MissileCamNO",
-  "name": "MissileCamNO",
+  "displayName": "MissileCamNO",
   "description": "Cycle through and follow your own in-flight missiles using '[' and ']' while flying. RWR/missile warnings keep playing. Press ';' (configurable) to snap the camera back to your aircraft's cockpit.",
   "tags": ["QoL", "Camera"],
   "urls": [
     { "name": "info", "url": "https://github.com/vullnetyy/MissileCamNO" }
   ],
   "authors": ["vullnetyy"],
-  "githubUser": "vullnetyy",
-  "githubRepo": "MissileCamNO",
-  "autoUpdate": "True",
+  "githubOwner": "vullnetyy",
+  "githubRepoName": "MissileCamNO",
+  "autoUpdateArtifacts": "True",
   "artifacts": [
     {
+      "fileName": "MissileCamNO-1.0.0.zip",
+      "version": "1.0.0",
+      "category": "release",
       "type": "plugin",
-      "fileName": "MissileCamNO-1.0.4.zip",
-      "downloadUrl": "https://github.com/<YOUR_GITHUB_USERNAME>/MissileCamNO/releases/download/v1.0.0/MissileCamNO-1.0.0.zip",
       "gameVersion": "0.33.4",
-      "modVersion": "1.0.4",
-      "releaseChannel": "Release",
+      "downloadUrl": "https://github.com/vullnetyy/MissileCamNO/releases/download/v1.0.0/MissileCamNO-1.0.0.zip",
       "hash": "sha256:74ac068f1df45fef76af28129991e99afdf76172dbdc82b48b905a4c85a44e3d"
     }
   ]
 }
 ```
-Field notes (from NOMNOM `SCHEMA.md`): `id` REQUIRED (≈ AssemblyName; filename matches it);
-`githubUser`/`githubRepo`/`autoUpdate` REQUIRED for auto‑tracking; `type` = `plugin`;
-`gameVersion` = the NO version you tested (main‑menu build number); `modVersion` **must match** the
-DLL metadata; `hash` = full `sha256:` digest.
+Field notes (from NOMNOM `template.json` + `ValidationSchema.json`): required top‑level fields are
+`id` (≈ AssemblyName; filename matches it), `displayName`, `description`, `authors`, `urls`,
+`artifacts`. `githubOwner`/`githubRepoName`/`autoUpdateArtifacts` are REQUIRED for auto‑tracking —
+**⚠️ use these exact names.** NOMNOM's auto‑update script (`Update-ModArtifact.ps1`) reads
+`autoUpdateArtifacts`/`githubOwner`/`githubRepoName` and **silently skips** any mod that still uses
+the old `autoUpdate`/`githubUser`/`githubRepo` names (the hourly job reports success but never
+updates your version). Required artifact fields: `fileName`, `version`, `downloadUrl`,
+`category` (`release`/`preRelease`), `type` (`plugin`); `gameVersion` = the NO version you tested
+(main‑menu build number); `version` **must match** the DLL metadata; `hash` = full `sha256:` digest.
 
 ### 24. Submit
 1. Commit the JSON on your fork and open a **Pull Request to NOMNOM's `main`.**
 2. NOMNOM's CI validates schema/content.
 3. A maintainer merges. Afterward your mod appears in NOMM, and future tagged releases are picked up
-   automatically (because `autoUpdate` is `True`). *(Alternatively, open a NOMNOM Issue requesting a
+   automatically (because `autoUpdateArtifacts` is `True`). *(Alternatively, open a NOMNOM Issue requesting a
    new mod — the PR route is the documented, faster one.)*
 
 ---
@@ -1023,7 +1028,8 @@ DLL metadata; `hash` = full `sha256:` digest.
 | Cycles include allied AI missiles | Shouldn't happen — the tracker uses your aircraft's own launch events + `Missile.owner`. If it does, tighten `EnsureAttached`'s seed to `m.owner == _aircraft` (already done). |
 | Warnings go silent while following | You'd only see this if you moved the main AudioListener — this mod doesn't. Re‑verify you're on the game's follow path (§14). |
 | CI fails on `Assembly-CSharp` | Hosted runner has no game DLLs — use self‑hosted (19a) or private refs (19b). |
-| NOMNOM PR validation fails | `modVersion` ≠ DLL version, bad `hash`, non‑parseable tag, or a missing required field. |
+| NOMNOM PR validation fails | artifact `version` ≠ DLL version, bad `hash`, non‑parseable tag, or a missing required field. |
+| Release published but NOMM/`manifest.json` never updates | Manifest uses outdated field names. Auto‑update needs `githubOwner`/`githubRepoName`/`autoUpdateArtifacts` (not `githubUser`/`githubRepo`/`autoUpdate`); with the old names the hourly job skips the mod and stays on the old version. |
 
 ---
 
