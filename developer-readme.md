@@ -65,7 +65,18 @@ run the shown install/start commands on this PC. Because the game is installed a
 `GameDir`, `dotnet build` finds `Assembly-CSharp.dll` and the `UnityEngine.*` DLLs locally with no
 extra configuration.
 
-**To release:**
+**To release (automated — recommended):**
+
+Run the [releaseUpdate.ps1](releaseUpdate.ps1) helper. It bumps the patch number in
+[MissileCamNO.csproj](MissileCamNO.csproj#L11), commits `Update version to <ver>`, tags the commit
+`v<ver>`, pushes the commit and tag to origin, then starts the self-hosted runner at
+`C:\actions-runner\run.cmd` so it picks up the pushed tag:
+
+```powershell
+./releaseUpdate.ps1
+```
+
+**To release (manual):**
 
 ```powershell
 git tag v1.0.6      # must match <Version> in the .csproj

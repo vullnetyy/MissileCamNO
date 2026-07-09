@@ -47,6 +47,7 @@
   - [19a. Option 1 — self‑hosted runner (recommended)](#19a-option-1--selfhosted-runner-recommended)
   - [19b. Option 2 — hosted runner + private reference DLLs](#19b-option-2--hosted-runner--private-reference-dlls)
   - [20. Cut a release](#20-cut-a-release)
+    - [20a. Recreate `releaseUpdate.ps1`](#20a-recreate-releaseupdateps1)
 - [Part G — Publish to NOMM (via NOMNOM)](#part-g--publish-to-nomm-via-nomnom)
   - [21. Requirements checklist](#21-requirements-checklist)
   - [22. Get the release SHA256](#22-get-the-release-sha256)
@@ -940,6 +941,16 @@ jobs:
 
 ### 20. Cut a release
 
+**Automated (recommended):** run the `releaseUpdate.ps1` helper from the repo root. It bumps the
+patch number in the `.csproj` `<Version>`, commits `Update version to <ver>`, tags `v<ver>`, pushes
+the commit and tag to origin, and starts the self-hosted runner at `C:\actions-runner\run.cmd`:
+
+```powershell
+./releaseUpdate.ps1
+```
+
+**Manual:**
+
 ```powershell
 git tag v1.0.0
 git push origin v1.0.0
@@ -947,6 +958,108 @@ git push origin v1.0.0
 The workflow builds, zips `MissileCamNO-1.0.0.zip`, writes the `sha256:` file, and creates the
 Release. **The DLL version must equal the tag** — NOMNOM enforces manifest artifact `version` == DLL
 metadata, which you set via `<Version>` in the `.csproj`.
+
+#### 20a. Recreate `releaseUpdate.ps1`
+
+If the helper script is missing, recreate it at the repo root (`MissileCamNO\releaseUpdate.ps1`)
+with the exact contents below. It does five things in order: (1) reads `<Version>` from the
+`.csproj` and increments the patch number, (2) commits with `Update version to <ver>`, (3) tags
+`v<ver>` (the release workflow triggers on `v*` tags), (4) pushes the commit and tag to origin, and
+(5) starts the self-hosted runner at `C:\actions-runner\run.cmd` so it picks up the pushed tag.
+
+The `$CsprojPath` and `$RunnerPath` parameters have sensible defaults but can be overridden, e.g.
+`./releaseUpdate.ps1 -RunnerPath 'D:\actions-runner'`.
+
+```powershell
+<#
+.SYNOPSIS
+    Bumps the patch version, commits, tags, pushes, and starts the self-hosted
+    GitHub Actions runner to build & publish the release.
+
+.DESCRIPTION
+    1. Reads <Version> from MissileCamNO.csproj, increments the patch number by 1,
+       and writes the new version back into the .csproj.
+    2. Commits the change with the message "Update version to <versionNumber>".
+    3. Tags the commit "v<versionNumber>" (the release workflow triggers on v* tags).
+    4. Pushes the commit and the newly created tag to origin.
+    5. Starts the self-hosted GitHub Actions runner (C:\actions-runner\run.cmd),
+       which picks up the pushed tag and builds/publishes the release.
+
+.EXAMPLE
+    ./releaseUpdate.ps1
+#>
+
+[CmdletBinding()]
+param(
+    [string]$CsprojPath   = (Join-Path $PSScriptRoot 'MissileCamNO.csproj'),
+    [string]$RunnerPath   = 'C:\actions-runner'
+)
+
+$ErrorActionPreference = 'Stop'
+
+# --- 1. Bump the patch version in the .csproj ------------------------------
+if (-not (Test-Path -LiteralPath $CsprojPath)) {
+    throw "Cannot find project file: $CsprojPath"
+}
+
+$content = Get-Content -LiteralPath $CsprojPath -Raw
+
+$match = [regex]::Match($content, '<Version>(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)</Version>')
+if (-not $match.Success) {
+    throw "Could not find a <Version>major.minor.patch</Version> element in $CsprojPath"
+}
+
+$major = [int]$match.Groups['major'].Value
+$minor = [int]$match.Groups['minor'].Value
+$patch = [int]$match.Groups['patch'].Value
+
+$oldVersion   = "$major.$minor.$patch"
+$patch       += 1
+$versionNumber = "$major.$minor.$patch"
+$tagName       = "v$versionNumber"
+
+Write-Host "Bumping version: $oldVersion -> $versionNumber" -ForegroundColor Cyan
+
+$newContent = $content -replace [regex]::Escape($match.Value), "<Version>$versionNumber</Version>"
+Set-Content -LiteralPath $CsprojPath -Value $newContent -NoNewline -Encoding UTF8
+
+# --- 2. Commit ------------------------------------------------------------
+$commitMessage = "Update version to $versionNumber"
+
+git add -- $CsprojPath
+if ($LASTEXITCODE -ne 0) { throw "git add failed (exit $LASTEXITCODE)." }
+
+git commit -m $commitMessage
+if ($LASTEXITCODE -ne 0) { throw "git commit failed (exit $LASTEXITCODE)." }
+
+# --- 3. Tag ---------------------------------------------------------------
+git tag $tagName
+if ($LASTEXITCODE -ne 0) { throw "git tag '$tagName' failed (exit $LASTEXITCODE)." }
+
+# --- 4. Push commit + the new tag -----------------------------------------
+git push origin HEAD
+if ($LASTEXITCODE -ne 0) { throw "git push (commit) failed (exit $LASTEXITCODE)." }
+
+git push origin $tagName
+if ($LASTEXITCODE -ne 0) { throw "git push (tag $tagName) failed (exit $LASTEXITCODE)." }
+
+Write-Host "Pushed commit and tag $tagName to origin." -ForegroundColor Green
+
+# --- 5. Start the self-hosted GitHub Actions runner -----------------------
+$runCmd = Join-Path $RunnerPath 'run.cmd'
+if (-not (Test-Path -LiteralPath $runCmd)) {
+    throw "Cannot find the Actions runner at: $runCmd"
+}
+
+Write-Host "Starting GitHub Actions runner: $runCmd" -ForegroundColor Cyan
+Push-Location $RunnerPath
+try {
+    & $runCmd
+}
+finally {
+    Pop-Location
+}
+```
 
 ---
 
